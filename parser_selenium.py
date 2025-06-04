@@ -156,8 +156,8 @@ async def check_tenders():
             )
 
             try:
-for chat_id in CHAT_IDS:
-    await bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML)
+                for chat_id in CHAT_IDS:
+                    await bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML)
                 log(f"📩 Отправлено: {tender_id}")
                 sent_count += 1
             except Exception as e:
