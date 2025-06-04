@@ -15,7 +15,7 @@ from telegram.constants import ParseMode
 # === НАСТРОЙКИ ===
 URL = 'https://zakupki.okmot.kg/popp/view/order/list.xhtml'
 TELEGRAM_TOKEN = '7399516902:AAEShFpb9hs2dHVrSsHD5T7yQ74OYRhqX2Q'
-CHAT_ID = 377568546
+CHAT_IDS = [377568546, 144731354]
 CHECK_INTERVAL = 180  # 3 минуты
 SEEN_FILE = 'seen_tenders.json'
 
@@ -156,7 +156,8 @@ async def check_tenders():
             )
 
             try:
-                await bot.send_message(chat_id=CHAT_ID, text=message, parse_mode=ParseMode.HTML)
+for chat_id in CHAT_IDS:
+    await bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML)
                 log(f"📩 Отправлено: {tender_id}")
                 sent_count += 1
             except Exception as e:
