@@ -2,3 +2,4 @@ requests
 beautifulsoup4
 python-telegram-bot
 python-certifi-win32
+selenium
