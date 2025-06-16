@@ -15,7 +15,7 @@ from telegram.constants import ParseMode
 # === НАСТРОЙКИ ===
 URL = 'https://zakupki.okmot.kg/popp/view/order/list.xhtml'
 TELEGRAM_TOKEN = '7399516902:AAEShFpb9hs2dHVrSsHD5T7yQ74OYRhqX2Q'
-CHAT_IDS = [377568546, 144731354]
+CHAT_IDS = [377568546, 144731354, 817346567]
 CHECK_INTERVAL = 180  # 3 минуты
 SEEN_FILE = 'seen_tenders.json'
 
