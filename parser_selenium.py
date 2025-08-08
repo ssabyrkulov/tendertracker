@@ -59,6 +59,26 @@ def translate_type(type_text):
         return "Работы"
     return type_text
 
+# === УСТОЙЧИВЫЙ ПОИСК СТРОК ТЕНДЕРОВ ===
+def find_tender_rows(driver):
+    """
+    Возвращает список <tr> с данными тендеров.
+    Пробует несколько вариантов, чтобы не отваливаться при мелких изменениях верстки.
+    """
+    XPATHS = [
+        # Самый надёжный вариант — чёт/нечёт
+        "//tr[(contains(@class,'ui-datatable-odd') or contains(@class,'ui-datatable-even')) and not(contains(@class,'ui-datatable-empty-message'))]",
+        # Иногда строка без odd/even, но с widget-content
+        "//tbody/tr[contains(@class,'ui-widget-content') and not(contains(@class,'ui-datatable-empty-message'))]",
+        # Через tbody с динамическим id
+        "//tbody[starts-with(@id,'j_idt') and contains(@id,':table_data')]/tr[not(contains(@class,'ui-datatable-empty-message'))]"
+    ]
+    for xp in XPATHS:
+        els = driver.find_elements(By.XPATH, xp)
+        if els:
+            return els
+    return []
+
 # === ОСНОВНАЯ ЛОГИКА ===
 async def check_tenders():
     log("🔍 Открываем браузер...")
@@ -80,19 +100,29 @@ async def check_tenders():
     skipped_count = 0
 
     try:
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "ui-datatable"))
-        )
+        # === ЖДЁМ ИМЕННО СТРОКИ, А НЕ ПРОСТО ТАБЛИЦУ ===
+        WebDriverWait(driver, 30).until(lambda d: len(find_tender_rows(d)) > 0)
 
+        # Пытаемся принудительно выбрать 10 строк на страницу (если есть селектор)
         try:
             select = Select(driver.find_element(By.XPATH, "//select[contains(@class, 'ui-paginator-rpp-options')]"))
+            # Если уже 10 — select_by_value('10') не навредит; если нет — переключит
             select.select_by_value("10")
-            time.sleep(2)
+            time.sleep(1.5)
         except Exception as e:
             log_error(f"⚠️ Не удалось выбрать '10 строк на странице': {e}")
 
-        rows = driver.find_elements(By.XPATH, "//tbody[@id='j_idt82:j_idt83:table_data']/tr")
+        rows = find_tender_rows(driver)
         log(f"🔎 Найдено строк: {len(rows)}")
+
+        # Отладочный дамп при нуле
+        if not rows:
+            driver.save_screenshot("debug.png")
+            with open("page.html", "w", encoding="utf-8") as f:
+                f.write(driver.page_source)
+            log_error("⚠️ rows == 0, сохранены debug.png и page.html для анализа.")
+            # Смысла дальше парсить нет
+            return
 
         bot = Bot(token=TELEGRAM_TOKEN)
 
@@ -101,35 +131,46 @@ async def check_tenders():
             if len(cells) < 9:
                 continue
 
+            # ID
             tender_id = cells[0].text.strip().split("\n")[-1]
 
+            # Организация
             org_lines = cells[1].text.strip().split('\n')
-            organization = org_lines[-1] if len(org_lines) > 1 else org_lines[0]
+            organization = org_lines[-1] if len(org_lines) > 1 else (org_lines[0] if org_lines else "")
 
+            # Тип
             try:
                 tender_type_span = cells[2].find_element(By.TAG_NAME, "span").text.strip()
                 tender_type_text = cells[2].text.replace(tender_type_span, "").strip()
-            except:
+            except Exception:
                 tender_type_text = "Unknown"
 
+            # Сумма
             try:
+                # Часто внутри 2 строки: валюта/лейбл и цифра
                 raw_lines = cells[6].text.strip().split('\n')
                 if len(raw_lines) >= 2:
-                    amount_line = raw_lines[1].replace(',', '').replace(' ', '')
-                    amount = int(float(amount_line.split('.')[0]))
+                    amount_line = raw_lines[1]
                 else:
-                    amount = 0
-                    log_error(f"⚠️ Не найдена сумма у ID {tender_id}: raw={cells[6].text.strip()}")
-            except:
+                    # fallback — берём всё, что есть
+                    amount_line = cells[6].text.strip()
+                amount_line = amount_line.replace(',', '').replace(' ', '')
+                # Отрезаем возможные копейки (.00)
+                amount = int(float(amount_line.split('.')[0])) if amount_line else 0
+            except Exception:
                 amount = 0
                 log_error(f"⚠️ Ошибка парсинга суммы у ID {tender_id}: raw={cells[6].text.strip()}")
 
+            # Название
             tender_name = cells[3].text.strip().replace('\n', ' ')
+
+            # Дедлайн (обычно в 9-м столбце)
             deadline_lines = cells[8].text.strip().split('\n')
-            deadline = deadline_lines[-1] if len(deadline_lines) > 1 else deadline_lines[0]
+            deadline = deadline_lines[-1] if len(deadline_lines) > 1 else (deadline_lines[0] if deadline_lines else "")
 
             log(f"\n📝 Проверяем тендер:\n🆔 ID: {tender_id}\n📌 Название: {tender_name}\n📛 Организация: {organization}\n📦 Тип: {tender_type_text}\n💰 Сумма: {amount:,} сом\n🗓 Дедлайн: {deadline}")
 
+            # Фильтры
             if tender_id in seen_ids:
                 log("⏩ Пропущен: уже отправляли")
                 skipped_count += 1
@@ -145,6 +186,7 @@ async def check_tenders():
                 skipped_count += 1
                 continue
 
+            # Сообщение
             message = (
                 f"📩 Найден тендер:\n"
                 f"📌 Название: {tender_name}\n"
@@ -155,6 +197,7 @@ async def check_tenders():
                 f"🔗 https://zakupki.okmot.kg/popp/view/order/view.xhtml?id={tender_id}"
             )
 
+            # Отправка
             try:
                 for chat_id in CHAT_IDS:
                     await bot.send_message(chat_id=chat_id, text=message, parse_mode=ParseMode.HTML)
